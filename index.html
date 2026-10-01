@@ -362,7 +362,7 @@ function sampleMatrix(){
     }
   }
   let heading=isMasterLibrary()?'Biblioteca de muestras de torno · matriz por categoría':'Matriz de referencias · '+E(activeStage());
-  let headers=isMasterLibrary()?['Categoría','Universo','Muestras físicas disponibles','Avance (%)','Únicas · 1 máquina','Compartidas · varias máquinas','Sin uso disponibles']:['Categoría','Referencias','Exclusivas','Comunes','Piezas terminadas'];
+  let headers=isMasterLibrary()?['Categoría','Universo','Muestras físicas disponibles','Avance (%)','Únicas disponibles','Compartidas disponibles','Sin uso disponibles']:['Categoría','Referencias','Exclusivas','Comunes','Piezas terminadas'];
   let note=isMasterLibrary()?'Única significa que la referencia se utiliza en una sola máquina de toda la biblioteca; compartida, en dos o más. Las filas de categoría pueden superponerse, por lo que solo el Total cuenta cada referencia una vez. «Sin máquina asociada» identifica referencias pendientes de relacionar con una máquina.':'Esta consulta proviene de la BOM de la etapa elegida. No modifica ni suma a la meta física de torno.';
   return `<div class="panel compact-matrix"><style>.compact-matrix .tablebox{max-height:520px}</style><h3>${heading}</h3>${table(headers,rows)}<p class="note">${note}</p></div>`;
 }
