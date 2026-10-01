@@ -301,5 +301,94 @@ const detailBeforeProgress=partDetail;
 partDetail=function(id){detailBeforeProgress(id);if(P[id]?.tipo!=='torno')return;let button=$('#saveSample');button.textContent='Registrar muestra validada';$('#sampleState').closest('label')?.remove();let fields=document.createElement('div');fields.className='filters';fields.innerHTML=`<label>Fecha del avance<input id="detailSampleDate" type="date" value="${localDay()}" max="${localDay()}"></label><span id="detailSampleFeedback" role="status"></span>`;button.parentElement.after(fields);button.onclick=()=>{try{let n=recordSample([id],'Validada',$('#detailSampleDate').value,$('#location').value,$('#sampleNotes').value);render();$('#detailSampleFeedback').textContent=n?'Avance registrado como borrador. Pulse Guardar cambios para compartirlo.':'Sin cambios.'}catch(e){$('#detailSampleFeedback').textContent=e.message}}};
 
 function sampleMatrix(){let pool=samplePool(),cats=uniq(D.maquinas.map(m=>m.categoria)).sort(),rows=[];for(let cat of [...cats,'__unused','__total']){let parts=pool.filter(p=>cat==='__total'||(cat==='__unused'?sampleCategories(p.id).length===0:sampleCategories(p.id).includes(cat))),have=parts.filter(p=>library[p.id]?.estado==='Validada'),validated=parts.filter(p=>library[p.id]?.estado==='Validada').length;let unique=have.filter(p=>uniq(R.filter(r=>r.origen==='torno'&&r.pieza===p.id&&(cat==='__total'||M[r.maquina]?.categoria===cat)).map(r=>r.maquina)).length===1).length,shared=have.filter(p=>uniq(R.filter(r=>r.origen==='torno'&&r.pieza===p.id&&(cat==='__total'||M[r.maquina]?.categoria===cat)).map(r=>r.maquina)).length>1).length;rows.push([E(cat==='__total'?'TOTAL · referencias sin duplicar':cat==='__unused'?'Sin máquina asociada':cat),parts.length|| (cat==='__unused'||cat==='__total'?0:'Sin detalle'),have.length,parts.length?fmt(100*have.length/parts.length)+' %':'—',unique,shared,have.length-unique-shared])}return `<div class="panel"><h3>Biblioteca de muestras · matriz por categoría</h3>${table(['Categoría','Universo','Tenemos · validadas','Avance (%)','Únicas que tenemos','Compartidas que tenemos','Sin uso que tenemos'],rows)}<p class="note">Tenemos = muestras ya validadas y registradas. Única = usada por una máquina de la categoría; compartida = usada por varias. Únicas + compartidas + sin uso = tenemos. Las filas de categorías se superponen; el total cuenta cada referencia una sola vez. “Sin detalle” significa que falta documentar el universo, no que esa categoría no necesite torno.</p></div>`}
+
+// La biblioteca física usa el maestro de torno; las demás etapas se consultan
+// desde sus BOM sin mezclarlas con la meta de muestras de torno.
+state.libraryStage=state.libraryStage||'master';
+function masterCategories(id){return uniq(R.filter(r=>r.origen==='torno'&&r.pieza===id).map(r=>M[r.maquina]?.categoria).filter(Boolean))}
+function libraryStages(){return [['master','Torno · maestro de piezas'],...uniq(R.filter(r=>r.origen==='bom').map(r=>r.etapa).filter(Boolean)).sort().map(s=>['bom:'+s,s+' · BOM'])]}
+function isMasterLibrary(){return state.libraryStage==='master'}
+function activeStage(){return isMasterLibrary()?'Torno':state.libraryStage.slice(4)}
+function activeRows(){return isMasterLibrary()?R.filter(r=>r.origen==='torno'):R.filter(r=>r.origen==='bom'&&r.etapa===activeStage())}
+function activePieces(){return uniq(activeRows().map(r=>r.pieza)).map(id=>P[id]).filter(Boolean)}
+function activeCategories(id){return uniq(activeRows().filter(r=>r.pieza===id).map(r=>M[r.maquina]?.categoria).filter(Boolean))}
+function allLibraryCategories(){return uniq(D.maquinas.map(m=>m.categoria).filter(Boolean)).sort()}
+function stageControl(){return `<label>Etapa<select id="libraryStage">${options(libraryStages(),state.libraryStage)}</select></label>`}
+function sampleCategoryControl(){return `<label>Categoría de uso<select id="sampleCategory">${options([...allLibraryCategories().map(c=>[c,c]),['__unused','Sin máquina asociada']],state.cat,'Todas las categorías')}</select></label>`}
+function stageSelection(){return activePieces().filter(p=>!state.cat||(state.cat==='__unused'?activeCategories(p.id).length===0:activeCategories(p.id).includes(state.cat)))}
+function stageUse(p){let n=uniq(activeRows().filter(r=>r.pieza===p.id&&(!state.cat||state.cat==='__unused'||M[r.maquina]?.categoria===state.cat)).map(r=>r.maquina)).length;return n===0?'unused':n===1?'exclusive':'shared'}
+function stageUseSummary(parts){return `<div class="panel"><h3>Uso de las referencias</h3>${cards([[parts.filter(p=>stageUse(p)==='exclusive').length,'Exclusivas · una máquina'],[parts.filter(p=>stageUse(p)==='shared').length,'Comunes · varias máquinas'],[parts.filter(p=>stageUse(p)==='unused').length,'Sin máquina asociada']])}<p class="note">Exclusiva: la referencia aparece en una máquina de esta selección. Común: aparece en varias. Las piezas en común son las que unen máquinas en el grafo.</p></div>`}
+function sampleSelection(){return isMasterLibrary()?samplePool().filter(p=>!state.cat||(state.cat==='__unused'?masterCategories(p.id).length===0:masterCategories(p.id).includes(state.cat))):stageSelection()}
+function sampleCategories(id){return isMasterLibrary()?masterCategories(id):activeCategories(id)}
+function sampleUse(p){return isMasterLibrary()?stageUse(p):stageUse(p)}
+
+// «Muestra: Sí» es evidencia de una muestra física previa. Se incorpora como
+// saldo inicial, sin evento ni fecha diaria inventada.
+const acceptBeforeDocumentedSamples=acceptPayload;
+acceptPayload=function(payload){
+  acceptBeforeDocumentedSamples(payload);
+  if(sampleProgress.documentedSamplesImported)return;
+  let changed=false;
+  for(let p of samplePool()){
+    if(norm(p.muestra)!=='si'||library[p.id])continue;
+    library[p.id]={estado:'Validada',origen:'Maestro de piezas torno',fecha:''};
+    sampleProgress.baseline[p.id]={estado:'Validada',origen:'Maestro de piezas torno',fecha:''};
+    changed=true;
+  }
+  sampleProgress.documentedSamplesImported=true;
+  if(changed)setTimeout(()=>markDirty(),0);
+};
+
+function sampleCards(parts){
+  if(!isMasterLibrary()){
+    let exclusive=parts.filter(p=>stageUse(p)==='exclusive').length,shared=parts.filter(p=>stageUse(p)==='shared').length;
+    return cards([[parts.length,'Referencias documentadas'],[exclusive,'Exclusivas'],[shared,'Comunes'],[parts.filter(p=>elementInfo(p).level!=='finished').length,'Materiales o conjuntos']]);
+  }
+  let s=sampleStats(parts),documented=parts.filter(p=>norm(p.muestra)==='si').length;
+  return cards([[s.total,'Universo · referencias'],[s.counts.Validada,'Muestras físicas existentes'],[s.total-s.counts.Validada,'Muestras que faltan'],[s.percent,'Avance (%)']])+`<div class="bar"><i style="width:${s.percent}%"></i></div><p class="note">${documented} referencias de esta selección traen «Muestra: Sí» en el maestro: se cuentan como saldo inicial y no se les asigna fecha de avance. Los nuevos registros diarios corresponden a muestras ya validadas.</p>`;
+}
+
+function sampleMatrix(){
+  let pool=isMasterLibrary()?samplePool():activePieces(),cats=allLibraryCategories(),rows=[];
+  for(let cat of [...cats,'__unused','__total']){
+    let parts=pool.filter(p=>cat==='__total'||(cat==='__unused'?sampleCategories(p.id).length===0:sampleCategories(p.id).includes(cat)));
+    if(isMasterLibrary()){
+      let have=parts.filter(p=>library[p.id]?.estado==='Validada'),unique=have.filter(p=>{let n=uniq(activeRows().filter(r=>r.pieza===p.id&&(cat==='__total'||M[r.maquina]?.categoria===cat)).map(r=>r.maquina)).length;return n===1}).length,shared=have.filter(p=>{let n=uniq(activeRows().filter(r=>r.pieza===p.id&&(cat==='__total'||M[r.maquina]?.categoria===cat)).map(r=>r.maquina)).length;return n>1}).length;
+      rows.push([E(cat==='__total'?'TOTAL · sin duplicar':cat==='__unused'?'Sin máquina asociada':cat),parts.length,have.length,parts.length?fmt(100*have.length/parts.length)+' %':'—',unique,shared,have.length-unique-shared]);
+    }else{
+      rows.push([E(cat==='__total'?'TOTAL · sin duplicar':cat==='__unused'?'Sin máquina asociada':cat),parts.length,parts.filter(p=>stageUse(p)==='exclusive').length,parts.filter(p=>stageUse(p)==='shared').length,parts.filter(p=>elementInfo(p).level==='finished').length]);
+    }
+  }
+  let heading=isMasterLibrary()?'Biblioteca de muestras · matriz por categoría':'Matriz de referencias · '+E(activeStage());
+  let headers=isMasterLibrary()?['Categoría','Universo','Muestras físicas','Avance (%)','Únicas que tenemos','Compartidas que tenemos','Sin uso que tenemos']:['Categoría','Referencias','Exclusivas','Comunes','Piezas terminadas'];
+  let note=isMasterLibrary()?'Las categorías se pueden superponer; el total cuenta cada referencia una sola vez. «Muestras físicas» incluye las referencias que el maestro marcó con «Muestra: Sí» y las registradas como validadas.':'Esta consulta proviene de la BOM de la etapa elegida. No modifica ni suma a la meta física de torno.';
+  return `<div class="panel"><h3>${heading}</h3>${table(headers,rows)}<p class="note">${note}</p></div>`;
+}
+
+function bindSampleControls(parts){
+  $('#sampleCategory').onchange=e=>{state.cat=e.target.value;render()};
+  let stage=document.getElementById('libraryStage');if(stage)stage.onchange=e=>{state.libraryStage=e.target.value;state.sampleUse='';state.sampleStatus='';render()};
+  let report=document.getElementById('sampleReport');if(report)report.onclick=()=>csv('avance_diario_torno.csv',[['Fecha','Validaciones','Avance neto','Puntos porcentuales','Muestras acumuladas','Porcentaje acumulado','Meta actual'],...progressDays(parts).map(r=>[r.day,r.validated,r.net,r.points,r.total,r.percent,parts.length])]);
+}
+
+overview=function(){
+  let parts=sampleSelection(),master=isMasterLibrary();
+  $('#main').innerHTML=`<h2>${master?'Avance de la biblioteca de torno':'Consulta por etapa de producción'}</h2><p class="sub">${master?'Una muestra física validada por cada referencia de torno.':'Seleccione una etapa y una categoría para consultar sus referencias, exclusivas y comunes.'}</p><div class="filters">${stageControl()}${sampleCategoryControl()}${master?'<button data-view="library" class="primary">Registrar muestras validadas</button><button id="sampleReport">Exportar avance diario CSV</button>':''}</div>${sampleMatrix()}${sampleCards(parts)}${stageUseSummary(parts)}${master?breakdown()+`<div class="panel">${dayTable(parts)}</div>`:`<div class="panel"><h3>Cómo interpretar esta etapa</h3><p class="note">La BOM puede contener materia prima, piezas terminadas y conjuntos. La columna «Piezas terminadas» permite separarlos antes de usarlos para decisiones de biblioteca física.</p></div>`}`;
+  bindSampleControls(parts);
+};
+
+libraryView=function(){
+  let parts=sampleSelection(),master=isMasterLibrary();
+  if(!master){
+    let visible=parts.filter(p=>(!state.sampleUse||stageUse(p)===state.sampleUse)&&(!state.search||norm(p.codigo+' '+p.nombre+' '+p.familia).includes(norm(state.search))));
+    $('#main').innerHTML=`<h2>Referencias de ${E(activeStage())}</h2><p class="sub">Consulta documental de esta etapa. La meta y el registro de muestras permanecen en Torno.</p><div class="filters">${stageControl()}${sampleCategoryControl()}<label>Buscar referencia<input id="search" type="search" value="${E(state.search)}" placeholder="Código, nombre o familia"></label><label>Uso<select id="sampleUse">${options([['exclusive','Exclusivas'],['shared','Comunes'],['unused','Sin máquina asociada']],state.sampleUse||'','Todos')}</select></label></div>${sampleMatrix()}${stageUseSummary(parts)}<p class="note">Mostrando ${visible.length} de ${parts.length} referencias documentadas.</p>${table(['Referencia','Categorías de uso','Uso','Nivel'],visible.map(p=>[partButton(p),E(sampleCategories(p.id).join(' · ')||'Sin máquina asociada'),({exclusive:'Exclusiva',shared:'Común',unused:'Sin máquina asociada'}[stageUse(p)]),E(elementInfo(p).level==='finished'?'Pieza terminada':'Material o conjunto')]))}`;
+    bindSampleControls(parts);$('#sampleUse').onchange=e=>{state.sampleUse=e.target.value;render()};return;
+  }
+  let visible=parts.filter(p=>(!state.sampleUse||stageUse(p)===state.sampleUse)&&(!state.search||norm(p.codigo+' '+p.nombre+' '+p.familia).includes(norm(state.search)))&&(!state.sampleStatus||(library[p.id]?.estado==='Validada'?'Validada':'Pendiente')===state.sampleStatus));
+  $('#main').innerHTML=`<h2>Muestras de torno · registro diario</h2><p class="sub">Elija la fecha y registre únicamente la referencia cuya muestra ya está validada.</p><div class="filters">${stageControl()}${sampleCategoryControl()}<label>Buscar referencia<input id="search" type="search" value="${E(state.search)}" placeholder="Código, nombre o familia"></label><label>Uso<select id="sampleUse">${options([['exclusive','Exclusivas'],['shared','Comunes'],['unused','Sin máquina asociada']],state.sampleUse||'','Todos')}</select></label><label>Estado<select id="sampleStatus">${options([['Pendiente','Sin muestra física'],['Validada','Con muestra física']],state.sampleStatus||'','Todas')}</select></label><label>Fecha del avance<input id="sampleDate" type="date" max="${localDay()}" value="${E(state.sampleDate||localDay())}"></label><button id="sampleMatrixExport">Exportar matriz CSV</button></div>${sampleCards(parts)}${stageUseSummary(parts)}<p class="note">Mostrando ${visible.length} de ${parts.length} referencias. Las etiquetas «Exclusiva» y «Común» se conservan porque son necesarias para decidir qué muestras físicas cubren más de una máquina.</p>${breakdown()}<p id="sampleFeedback" role="status">Registre la referencia solo cuando la muestra esté validada.</p>${table(['Referencia','Categorías de uso','Uso','Muestra física','Origen / último avance','Acción'],visible.map(p=>[partButton(p),E(sampleCategories(p.id).join(' · ')||'Sin máquina asociada'),({exclusive:'Exclusiva',shared:'Común',unused:'Sin máquina asociada'}[stageUse(p)]),E(library[p.id]?.estado==='Validada'?'Sí':'No'),E(library[p.id]?.origen==='Maestro de piezas torno'?'Maestro · saldo inicial':sampleProgress.events.filter(e=>e.pieza===p.id).at(-1)?.dia||'Pendiente'),library[p.id]?.estado==='Validada'?'<span class="pill">Registrada</span>':'<button class="rowSampleSave" data-id="'+E(p.id)+'" aria-label="Registrar '+E(p.id)+'">Registrar validada</button>']))}`;
+  bindSampleControls(parts);$('#sampleUse').onchange=e=>{state.sampleUse=e.target.value;render()};$('#sampleStatus').onchange=e=>{state.sampleStatus=e.target.value;render()};$('#sampleDate').onchange=e=>state.sampleDate=e.target.value;
+  document.querySelectorAll('.rowSampleSave').forEach(b=>b.onclick=()=>{try{let n=recordSample([b.dataset.id],'Validada',$('#sampleDate').value,'','');notice=n?'Muestra validada registrada. Guarde los cambios para compartir el avance.':'Sin cambios.';render()}catch(e){$('#sampleFeedback').textContent=e.message}});
+  $('#sampleMatrixExport').onclick=()=>csv('matriz_muestras_torno.csv',[['Referencia','Código','Nombre','Categorías','Muestra física','Origen','Muestra en maestro'],...parts.map(p=>[p.id,p.codigo,p.nombre,sampleCategories(p.id).join(' / '),library[p.id]?.estado==='Validada'?'Sí':'No',library[p.id]?.origen||'',p.muestra||''])]);
+};
 </script>
 </body></html>
