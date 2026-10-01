@@ -316,7 +316,8 @@ function allLibraryCategories(){return uniq(D.maquinas.map(m=>m.categoria).filte
 function stageControl(){return `<label>Etapa<select id="libraryStage">${options(libraryStages(),state.libraryStage)}</select></label>`}
 function sampleCategoryControl(){return `<label>Categoría de uso<select id="sampleCategory">${options([...allLibraryCategories().map(c=>[c,c]),['__unused','Sin máquina asociada']],state.cat,'Todas las categorías')}</select></label>`}
 function stageSelection(){return activePieces().filter(p=>!state.cat||(state.cat==='__unused'?activeCategories(p.id).length===0:activeCategories(p.id).includes(state.cat)))}
-function stageUse(p){let n=uniq(activeRows().filter(r=>r.pieza===p.id&&(!state.cat||state.cat==='__unused'||M[r.maquina]?.categoria===state.cat)).map(r=>r.maquina)).length;return n===0?'unused':n===1?'exclusive':'shared'}
+function usageAt(p,category=''){let n=uniq(activeRows().filter(r=>r.pieza===p.id&&(!category||category==='__unused'||M[r.maquina]?.categoria===category)).map(r=>r.maquina)).length;return n===0?'unused':n===1?'exclusive':'shared'}
+function stageUse(p){return usageAt(p,state.cat)}
 function stageUseSummary(parts){return `<div class="panel"><h3>Uso de las referencias</h3>${cards([[parts.filter(p=>stageUse(p)==='exclusive').length,'Exclusivas · una máquina'],[parts.filter(p=>stageUse(p)==='shared').length,'Comunes · varias máquinas'],[parts.filter(p=>stageUse(p)==='unused').length,'Sin máquina asociada']])}<p class="note">Exclusiva: la referencia aparece en una máquina de esta selección. Común: aparece en varias. Las piezas en común son las que unen máquinas en el grafo.</p></div>`}
 function sampleSelection(){return isMasterLibrary()?samplePool().filter(p=>!state.cat||(state.cat==='__unused'?masterCategories(p.id).length===0:masterCategories(p.id).includes(state.cat))):stageSelection()}
 function sampleCategories(id){return isMasterLibrary()?masterCategories(id):activeCategories(id)}
@@ -356,7 +357,7 @@ function sampleMatrix(){
       let have=parts.filter(p=>library[p.id]?.estado==='Validada'),unique=have.filter(p=>{let n=uniq(activeRows().filter(r=>r.pieza===p.id&&(cat==='__total'||M[r.maquina]?.categoria===cat)).map(r=>r.maquina)).length;return n===1}).length,shared=have.filter(p=>{let n=uniq(activeRows().filter(r=>r.pieza===p.id&&(cat==='__total'||M[r.maquina]?.categoria===cat)).map(r=>r.maquina)).length;return n>1}).length;
       rows.push([E(cat==='__total'?'TOTAL · sin duplicar':cat==='__unused'?'Sin máquina asociada':cat),parts.length,have.length,parts.length?fmt(100*have.length/parts.length)+' %':'—',unique,shared,have.length-unique-shared]);
     }else{
-      rows.push([E(cat==='__total'?'TOTAL · sin duplicar':cat==='__unused'?'Sin máquina asociada':cat),parts.length,parts.filter(p=>stageUse(p)==='exclusive').length,parts.filter(p=>stageUse(p)==='shared').length,parts.filter(p=>elementInfo(p).level==='finished').length]);
+      rows.push([E(cat==='__total'?'TOTAL · sin duplicar':cat==='__unused'?'Sin máquina asociada':cat),parts.length,parts.filter(p=>usageAt(p,cat==='__total'?'':cat)==='exclusive').length,parts.filter(p=>usageAt(p,cat==='__total'?'':cat)==='shared').length,parts.filter(p=>elementInfo(p).level==='finished').length]);
     }
   }
   let heading=isMasterLibrary()?'Biblioteca de muestras · matriz por categoría':'Matriz de referencias · '+E(activeStage());
